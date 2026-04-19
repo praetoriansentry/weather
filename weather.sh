@@ -53,14 +53,13 @@ extract_leaves() {
             }'
 }
 
-# per-parameter extraction — time column drives the row count
-extract_leaves "//time-layout/start-valid-time"                > "$workdir/t.col"
+extract_leaves "//time-layout/start-valid-time" | head -n "$hours" > "$workdir/t.col"
 n_rows=$(wc -l < "$workdir/t.col")
 
 pad_col() {
-    # Usage: pad_col <xpath> <outfile>. Pads output to $n_rows lines (empty for missing).
-    extract_leaves "$1" > "$2.raw"
-    awk -v n="$n_rows" 'NR<=n {print} END {for (i=NR+1; i<=n; i++) print ""}' "$2.raw" > "$2"
+    # Usage: pad_col <xpath> <outfile>. Truncates/pads to $n_rows lines (empty for missing).
+    extract_leaves "$1" \
+        | awk -v n="$n_rows" 'NR<=n {print} END {for (i=NR+1; i<=n; i++) print ""}' > "$2"
 }
 
 pad_col "//temperature[@type='hourly']/value"           "$workdir/temp.col"
@@ -77,6 +76,7 @@ pad_col "//hourly-qpf/value"                            "$workdir/qpf.col"
 # thunder level: one line per <weather-conditions>; map thunderstorms coverage to 0-4
 { xmllint --xpath "//weather/weather-conditions" "$xml" 2>/dev/null || true; } \
     | awk -v n="$n_rows" '
+        NR > n { exit }
         /weather-type="thunderstorms"/ {
             match($0, /weather-type="thunderstorms"[^\/]*coverage="[^"]*"/)
             s = substr($0, RSTART, RLENGTH)
@@ -93,7 +93,6 @@ pad_col "//hourly-qpf/value"                            "$workdir/qpf.col"
         END { for (i=NR+1; i<=n; i++) print 0 }
     ' > "$workdir/thunder.col"
 
-# Combine into a TSV (time, temp, dewpt, heatidx, wind, gust, winddir, cloud, rh, pop, qpf, thunder)
 paste -d $'\t' \
     "$workdir/t.col" \
     "$workdir/temp.col" \
@@ -107,8 +106,7 @@ paste -d $'\t' \
     "$workdir/pop.col" \
     "$workdir/qpf.col" \
     "$workdir/thunder.col" \
-    > "$workdir/full.tsv"
-head -n "$hours" "$workdir/full.tsv" > "$tsv"
+    > "$tsv"
 
 rows=$(wc -l < "$tsv")
 echo "extracted $rows hourly rows" >&2
@@ -126,11 +124,8 @@ location_label="${lat}, ${lon}"
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 gp="$script_dir/meteogram.gp"
 
-for term in pngcairo svg; do
-    case $term in
-        pngcairo) ext=png ;;
-        svg)      ext=svg ;;
-    esac
+render() {
+    local term=$1 ext=$2
     gnuplot \
         -e "term_name='$term'" \
         -e "outfile='${out}.${ext}'" \
@@ -141,4 +136,8 @@ for term in pngcairo svg; do
         -e "location_label='$location_label'" \
         "$gp"
     echo "wrote ${out}.${ext}" >&2
-done
+}
+
+render pngcairo png &
+render svg      svg &
+wait
