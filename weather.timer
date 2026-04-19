@@ -1,0 +1,11 @@
+[Unit]
+Description=Run weather.service hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=2min
+Persistent=true
+Unit=weather.service
+
+[Install]
+WantedBy=timers.target
